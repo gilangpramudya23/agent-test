@@ -45,55 +45,89 @@ logger = logging.getLogger(__name__)
 @st.cache_resource(show_spinner=False)
 def initialize_agents():
     """
-    Initialize semua agent dengan caching.
-    Hanya dijalankan sekali saat pertama kali aplikasi dimuat.
+    Initialize semua agent dengan caching dan graceful error handling.
+    Jika ada agent yang gagal, tetap lanjutkan dengan agent lain.
     
     Returns:
         Tuple: (rag_agent, sql_agent, advisor_agent, orchestrator)
     """
+    rag_agent = None
+    sql_agent = None
+    advisor_agent = None
+    orchestrator = None
+    
+    errors = []
+    
+    # 1. Initialize RAG Agent (optional - butuh Qdrant)
     try:
-        st.sidebar.info("📄 Menginisialisasi AI Agents...")
-        
-        # 1. Initialize RAG Agent
         with st.spinner("Menghubungkan ke database lowongan..."):
             rag_agent = RAGAgent(
                 collection_name="indonesian_jobs",
                 embedding_model="text-embedding-3-small",
                 llm_model="gpt-4o-mini"
             )
-        
-        # 2. Initialize SQL Agent  
+            st.sidebar.success("✅ RAG Agent siap")
+    except Exception as e:
+        error_msg = f"RAG Agent: {str(e)[:80]}"
+        errors.append(error_msg)
+        st.sidebar.warning(f"⚠️ RAG Agent gagal (fitur pencarian lowongan tidak tersedia)")
+        logger.error(f"RAG Agent error: {str(e)}")
+    
+    # 2. Initialize SQL Agent (optional - auto-create DB)
+    try:
         with st.spinner("Menghubungkan ke database analitik..."):
             sql_agent = SQLAgent(
                 llm_model="gpt-3.5-turbo",
                 verbose=False
             )
-        
-        # 3. Initialize Advisor Agent (butuh RAG Agent)
+            st.sidebar.success("✅ SQL Agent siap")
+    except Exception as e:
+        error_msg = f"SQL Agent: {str(e)[:80]}"
+        errors.append(error_msg)
+        st.sidebar.warning(f"⚠️ SQL Agent gagal (fitur analisis data tidak tersedia)")
+        logger.error(f"SQL Agent error: {str(e)}")
+    
+    # 3. Initialize Advisor Agent (butuh RAG optional)
+    try:
         with st.spinner("Menyiapkan konsultan karir..."):
             advisor_agent = AdvisorAgent(
-                rag_agent=rag_agent,
+                rag_agent=rag_agent,  # Bisa None
                 llm_model="gpt-4o-mini",
                 temperature=0.7
             )
-        
-        # 4. Initialize Orchestrator (pusat kendali)
-        with st.spinner("Menyiapkan sistem routing..."):
-            orchestrator = Orchestrator(
-                rag_agent=rag_agent,
-                sql_agent=sql_agent,
-                advisor_agent=advisor_agent,
-                llm_model="gpt-4o-mini",
-                temperature=0
-            )
-        
-        st.sidebar.success("✅ Sistem siap!")
-        return rag_agent, sql_agent, advisor_agent, orchestrator
-        
+            st.sidebar.success("✅ Advisor Agent siap")
     except Exception as e:
-        st.sidebar.error(f"❌ Gagal menginisialisasi: {str(e)[:100]}")
-        logger.error(f"Initialization error: {str(e)}")
-        return None, None, None, None
+        error_msg = f"Advisor Agent: {str(e)[:80]}"
+        errors.append(error_msg)
+        st.sidebar.warning(f"⚠️ Advisor Agent gagal (fitur konsultasi tidak tersedia)")
+        logger.error(f"Advisor Agent error: {str(e)}")
+    
+    # 4. Initialize Orchestrator (butuh minimal 1 agent)
+    if rag_agent or sql_agent or advisor_agent:
+        try:
+            with st.spinner("Menyiapkan sistem routing..."):
+                orchestrator = Orchestrator(
+                    rag_agent=rag_agent,
+                    sql_agent=sql_agent,
+                    advisor_agent=advisor_agent,
+                    llm_model="gpt-4o-mini",
+                    temperature=0
+                )
+                st.sidebar.success("✅ Orchestrator siap")
+        except Exception as e:
+            error_msg = f"Orchestrator: {str(e)[:80]}"
+            errors.append(error_msg)
+            st.sidebar.error(f"❌ Orchestrator gagal")
+            logger.error(f"Orchestrator error: {str(e)}")
+    
+    # Show summary
+    if errors:
+        with st.sidebar.expander("⚠️ Detail Error", expanded=False):
+            for err in errors:
+                st.code(err, language="text")
+    
+    # Return agents (bisa ada yang None)
+    return rag_agent, sql_agent, advisor_agent, orchestrator
 
 # ==================== STEP 3: SIDEBAR & NAVIGATION ====================
 def setup_sidebar():
@@ -615,38 +649,53 @@ def main():
     """
     # Check environment first
     if not check_environment():
+        st.warning("⚠️ Silakan setup environment variables terlebih dahulu")
         return
     
     # Initialize agents dengan caching
     rag_agent, sql_agent, advisor_agent, orchestrator = initialize_agents()
     
-    # Jika inisialisasi gagal, tampilkan error
-    if orchestrator is None:
-        st.error("""
-        ❌ Gagal menginisialisasi sistem. Kemungkinan penyebab:
-        1. API keys tidak valid
-        2. Koneksi database gagal
-        3. Network error
-        
-        Periksa:
-        - File `.env` sudah benar?
-        - Koneksi internet stabil?
-        - API quota masih tersedia?
-        """)
-        return
-    
     # Setup sidebar dan dapatkan mode yang dipilih
     mode = setup_sidebar()
     
+    # Show system status
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔧 Status Sistem")
+    
+    agents_status = {
+        "RAG Agent (Pencarian)": rag_agent is not None,
+        "SQL Agent (Analisis)": sql_agent is not None,
+        "Advisor Agent (Konsultasi)": advisor_agent is not None,
+        "Orchestrator (Router)": orchestrator is not None
+    }
+    
+    for agent_name, is_ready in agents_status.items():
+        if is_ready:
+            st.sidebar.success(f"✅ {agent_name}")
+        else:
+            st.sidebar.error(f"❌ {agent_name}")
+    
     # Main content area berdasarkan mode
     if mode == "💬 Tanya Lowongan":
-        render_chat_mode(orchestrator)
+        if orchestrator is not None:
+            render_chat_mode(orchestrator)
+        else:
+            st.error("❌ Sistem routing belum siap. Fitur chat tidak tersedia.")
+            st.info("Periksa error di sidebar untuk detail.")
     
     elif mode == "📊 Analisis Data":
-        render_data_mode(sql_agent)
+        if sql_agent is not None:
+            render_data_mode(sql_agent)
+        else:
+            st.error("❌ SQL Agent belum siap. Fitur analisis data tidak tersedia.")
+            st.info("Kemungkinan penyebab: OpenAI API error atau database issue.")
     
     elif mode == "📄 Analisis CV":
-        render_cv_mode(advisor_agent)
+        if advisor_agent is not None:
+            render_cv_mode(advisor_agent)
+        else:
+            st.error("❌ Advisor Agent belum siap. Fitur analisis CV tidak tersedia.")
+            st.info("Kemungkinan penyebab: OpenAI API error.")
     
     elif mode == "ℹ️ Tentang":
         render_about_mode()
