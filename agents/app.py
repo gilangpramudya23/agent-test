@@ -130,15 +130,10 @@ def initialize_agents():
     return rag_agent, sql_agent, advisor_agent, orchestrator
 
 # ==================== STEP 3: SIDEBAR & NAVIGATION ====================
-def setup_sidebar(rag_agent, sql_agent, advisor_agent, orchestrator):
+def setup_sidebar():
     """
     Setup sidebar dengan navigation dan informasi
-    
-    Args:
-        rag_agent: Instance RAGAgent
-        sql_agent: Instance SQLAgent
-        advisor_agent: Instance AdvisorAgent
-        orchestrator: Instance Orchestrator
+    NOTE: Function ini TIDAK butuh parameter agents karena akan dipanggil sebelum agents diinisialisasi
     """
     with st.sidebar:
         st.title("🎯 AI Career Assistant")
@@ -173,18 +168,15 @@ def setup_sidebar(rag_agent, sql_agent, advisor_agent, orchestrator):
         
         st.markdown("---")
         
-        # System Status
+        # System Status (akan diupdate nanti setelah agents diinisialisasi)
         st.subheader("🔧 Status Sistem")
-        if all(agent is not None for agent in [rag_agent, sql_agent, advisor_agent, orchestrator]):
-            st.success("Semua sistem berjalan normal")
-        else:
-            st.warning("Beberapa sistem dalam mode terbatas")
+        status_placeholder = st.empty()
         
         # Footer
         st.markdown("---")
         st.caption("v1.0 • © 2024 AI Career Assistant")
         
-        return mode
+        return mode, status_placeholder
 
 # ==================== STEP 8: UTILITY FUNCTIONS ====================
 def export_chat_history():
@@ -230,8 +222,8 @@ def show_example_queries():
     st.info("💡 **Contoh Pertanyaan:**")
     for example in examples:
         if st.button(example, key=f"example_{example[:10]}", use_container_width=True):
-            # Auto-fill chat input (tidak langsung di Streamlit, butuh workaround)
-            st.session_state.chat_input = example
+            # Simpan query ke session state
+            st.session_state.last_example = example
             st.rerun()
 
 def check_environment():
@@ -267,6 +259,40 @@ def check_environment():
     
     return True
 
+def update_sidebar_status(status_placeholder, rag_agent, sql_agent, advisor_agent, orchestrator):
+    """
+    Update status sistem di sidebar
+    
+    Args:
+        status_placeholder: Streamlit empty placeholder untuk status
+        rag_agent: Instance RAGAgent
+        sql_agent: Instance SQLAgent
+        advisor_agent: Instance AdvisorAgent
+        orchestrator: Instance Orchestrator
+    """
+    with status_placeholder.container():
+        agents_status = {
+            "RAG Agent (Pencarian)": rag_agent is not None,
+            "SQL Agent (Analisis)": sql_agent is not None,
+            "Advisor Agent (Konsultasi)": advisor_agent is not None,
+            "Orchestrator (Router)": orchestrator is not None
+        }
+        
+        all_ready = all(agents_status.values())
+        
+        if all_ready:
+            st.success("✅ Semua sistem berjalan normal")
+        else:
+            st.warning("⚠️ Beberapa sistem dalam mode terbatas")
+            
+            # Tampilkan detail status
+            with st.expander("Detail Status", expanded=False):
+                for agent_name, is_ready in agents_status.items():
+                    if is_ready:
+                        st.success(f"✅ {agent_name}")
+                    else:
+                        st.error(f"❌ {agent_name}")
+
 # ==================== STEP 4: CHAT INTERFACE ====================
 def render_chat_mode(orchestrator):
     """
@@ -285,13 +311,24 @@ def render_chat_mode(orchestrator):
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     
+    # Auto-fill dari contoh pertanyaan
+    if "last_example" in st.session_state:
+        example = st.session_state.last_example
+        del st.session_state.last_example
+        
+        # Simpan ke chat input
+        if "chat_input" not in st.session_state:
+            st.session_state.chat_input = example
+    
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
     # Chat input
-    if prompt := st.chat_input("Tanya tentang lowongan atau karir..."):
+    chat_input_key = "chat_input_" + str(len(st.session_state.messages))
+    
+    if prompt := st.chat_input("Tanya tentang lowongan atau karir...", key=chat_input_key):
         # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.session_state.chat_history.append(("user", prompt))
@@ -314,7 +351,7 @@ def render_chat_mode(orchestrator):
                     # Simulate streaming
                     for chunk in response.split():
                         full_response += chunk + " "
-                        time.sleep(0.05)
+                        time.sleep(0.02)  # Lebih cepat
                         message_placeholder.markdown(full_response + "▌")
                     
                     message_placeholder.markdown(full_response)
@@ -333,6 +370,7 @@ def render_chat_mode(orchestrator):
     with col1:
         if st.button("🧹 Clear Chat", use_container_width=True):
             st.session_state.messages = []
+            st.session_state.chat_history = []
             st.rerun()
     with col2:
         if st.button("💾 Export Chat", use_container_width=True):
@@ -393,12 +431,12 @@ def render_cv_mode(advisor_agent):
                 # Step 1: Processing file
                 status_text.text("📥 Memproses file CV...")
                 progress_bar.progress(25)
-                time.sleep(1)
+                time.sleep(0.5)
                 
                 # Step 2: Extracting text
                 status_text.text("📤 Mengekstrak teks dari CV...")
                 progress_bar.progress(50)
-                time.sleep(1)
+                time.sleep(0.5)
                 
                 # Step 3: Analyzing profile
                 status_text.text("🧠 Menganalisis profil dan skill...")
@@ -505,7 +543,8 @@ def render_data_mode(sql_agent):
     custom_query = st.text_area(
         "Tanya apapun tentang data lowongan:",
         placeholder="Contoh: 'Tampilkan 5 skill yang paling banyak dicari untuk data scientist'",
-        height=100
+        height=100,
+        key="data_query_input"
     )
     
     # Execute query
@@ -525,12 +564,6 @@ def render_data_mode(sql_agent):
                     # Jika query numerik/statistik
                     st.info(result)
                     
-                    # Visualisasi sederhana (jika ada angka)
-                    if any(word in result for word in ["%", "persen", "rata-rata", "jumlah"]):
-                        # Contoh visualisasi sederhana
-                        st.caption("📈 Visualisasi Data:")
-                        # Di sini bisa ditambahkan chart berdasarkan parsing result
-                        
                 else:
                     # General response
                     st.write(result)
@@ -656,30 +689,18 @@ def main():
     # Check environment first
     if not check_environment():
         st.warning("⚠️ Silakan setup environment variables terlebih dahulu")
+        # Tampilkan mode about jika environment belum siap
+        render_about_mode()
         return
+    
+    # Setup sidebar dan dapatkan mode yang dipilih
+    mode, status_placeholder = setup_sidebar()
     
     # Initialize agents dengan caching
     rag_agent, sql_agent, advisor_agent, orchestrator = initialize_agents()
     
-    # Setup sidebar dan dapatkan mode yang dipilih
-    mode = setup_sidebar()
-    
-    # Show system status
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🔧 Status Sistem")
-    
-    agents_status = {
-        "RAG Agent (Pencarian)": rag_agent is not None,
-        "SQL Agent (Analisis)": sql_agent is not None,
-        "Advisor Agent (Konsultasi)": advisor_agent is not None,
-        "Orchestrator (Router)": orchestrator is not None
-    }
-    
-    for agent_name, is_ready in agents_status.items():
-        if is_ready:
-            st.sidebar.success(f"✅ {agent_name}")
-        else:
-            st.sidebar.error(f"❌ {agent_name}")
+    # Update status di sidebar
+    update_sidebar_status(status_placeholder, rag_agent, sql_agent, advisor_agent, orchestrator)
     
     # Main content area berdasarkan mode
     if mode == "💬 Tanya Lowongan":
@@ -688,6 +709,7 @@ def main():
         else:
             st.error("❌ Sistem routing belum siap. Fitur chat tidak tersedia.")
             st.info("Periksa error di sidebar untuk detail.")
+            render_about_mode()  # Fallback ke about page
     
     elif mode == "📊 Analisis Data":
         if sql_agent is not None:
@@ -695,6 +717,7 @@ def main():
         else:
             st.error("❌ SQL Agent belum siap. Fitur analisis data tidak tersedia.")
             st.info("Kemungkinan penyebab: OpenAI API error atau database issue.")
+            render_about_mode()  # Fallback ke about page
     
     elif mode == "📄 Analisis CV":
         if advisor_agent is not None:
@@ -702,6 +725,7 @@ def main():
         else:
             st.error("❌ Advisor Agent belum siap. Fitur analisis CV tidak tersedia.")
             st.info("Kemungkinan penyebab: OpenAI API error.")
+            render_about_mode()  # Fallback ke about page
     
     elif mode == "ℹ️ Tentang":
         render_about_mode()
@@ -721,6 +745,11 @@ if __name__ == "__main__":
     }
     .stProgress > div > div > div {
         background-color: #4CAF50;
+    }
+    /* Improve readability */
+    .stMarkdown {
+        font-size: 16px;
+        line-height: 1.6;
     }
     </style>
     """, unsafe_allow_html=True)
