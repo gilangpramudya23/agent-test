@@ -8,9 +8,7 @@ import logging
 from typing import Optional
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities import SQLDatabase
-from langchain.agents import create_sql_agent, AgentExecutor
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
-from langchain.agents.agent_types import AgentType
+from langchain_community.agent_toolkits import create_sql_agent, SQLDatabaseToolkit  # ✅ FIXED
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +41,6 @@ class SQLAgent:
                 db_uri,
                 include_tables=['jobs', 'salaries', 'companies'],  # Hanya table yang diperlukan
                 sample_rows_in_table_info=3,  # Ambil sample data untuk context
-                lazy_refresh=True
             )
             logger.info(f"Connected to database: {db_uri}")
         except Exception as e:
@@ -61,14 +58,16 @@ class SQLAgent:
         toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
         
         # Create SQL agent dengan safety features
-        self.agent_executor: AgentExecutor = create_sql_agent(
+        self.agent_executor = create_sql_agent(
             llm=self.llm,
             toolkit=toolkit,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=verbose,
             max_iterations=max_iterations,
             handle_parsing_errors=True,  # Self-correction
-            early_stopping_method="force",  # Stop jika stuck
+            agent_executor_kwargs={
+                "handle_parsing_errors": True,
+                "return_intermediate_steps": False
+            },
             prefix="""
             Anda adalah assistant yang ahli dalam database lowongan pekerjaan Indonesia.
             
@@ -91,15 +90,6 @@ class SQLAgent:
             User: "Top 5 perusahaan dengan gaji tertinggi"
             SQL: SELECT company, AVG((salary_min + salary_max) / 2) as avg_salary FROM jobs GROUP BY company ORDER BY avg_salary DESC LIMIT 5
             """,
-            format_instructions="""Gunakan format berikut:
-            
-            Question: pertanyaan user
-            Thought: analisis Anda tentang query yang dibutuhkan
-            Action: query SQL yang akan dieksekusi
-            Observation: hasil dari database
-            ... (ulangi Thought/Action/Observation jika perlu)
-            Final Answer: jawaban akhir dalam bahasa Indonesia
-            """
         )
     
     def _auto_detect_db_path(self) -> str:
