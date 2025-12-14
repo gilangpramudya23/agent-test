@@ -2,13 +2,13 @@
 Orchestrator Agent sebagai central router untuk semua agent
 Mengklasifikasikan intent dan mendelegasikan ke agent yang tepat
 """
-
+import os
 import logging
 import re
 from typing import Dict, Any, Optional
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ class Orchestrator:
             
             # Clean and validate intent
             intent = intent.strip().upper()
-            valid_intents = ["RAG_QUERY", "SQL_QUERY", "ADVISOR_QUENT"]
+            valid_intents = ["RAG_QUERY", "SQL_QUERY", "ADVISOR_QUERY"]
             
             if intent in valid_intents:
                 return intent
