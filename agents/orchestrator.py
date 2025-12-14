@@ -2,6 +2,7 @@
 Orchestrator Agent sebagai central router untuk semua agent
 Mengklasifikasikan intent dan mendelegasikan ke agent yang tepat
 """
+
 import os
 import logging
 import re
@@ -13,29 +14,38 @@ from langchain_core.output_parsers import StrOutputParser
 logger = logging.getLogger(__name__)
 
 class Orchestrator:
-    """Central router untuk multi-agent system"""
+    """Central router untuk multi-agent system dengan graceful degradation"""
     
     def __init__(
         self,
-        rag_agent,
-        sql_agent,
-        advisor_agent,
+        rag_agent=None,  # ✅ Optional
+        sql_agent=None,  # ✅ Optional
+        advisor_agent=None,  # ✅ Optional
         llm_model: str = "gpt-4o-mini",
         temperature: float = 0
     ):
         """
-        Inisialisasi Orchestrator dengan semua agent
+        Inisialisasi Orchestrator dengan semua agent (optional)
         
         Args:
-            rag_agent: Instance RAGAgent
-            sql_agent: Instance SQLAgent
-            advisor_agent: Instance AdvisorAgent
+            rag_agent: Instance RAGAgent (optional)
+            sql_agent: Instance SQLAgent (optional)
+            advisor_agent: Instance AdvisorAgent (optional)
             llm_model: Model untuk intent classification
             temperature: Temperature untuk LLM
         """
         self.rag_agent = rag_agent
         self.sql_agent = sql_agent
         self.advisor_agent = advisor_agent
+        
+        # Track which agents are available
+        self.available_agents = {
+            "rag": rag_agent is not None,
+            "sql": sql_agent is not None,
+            "advisor": advisor_agent is not None
+        }
+        
+        logger.info(f"Orchestrator initialized with agents: {self.available_agents}")
         
         # LLM untuk intent classification
         self.llm = ChatOpenAI(
@@ -75,7 +85,7 @@ class Orchestrator:
         - Jika query mengandung kata: "gaji", "rata-rata", "statistik", "trend", "perbandingan", "tertinggi", "terendah" → SQL_QUERY
         - Jika query tentang "lowongan", "pekerjaan", "cari kerja", "perusahaan", "posisi" → RAG_QUERY
         - Jika query tentang "karir", "saran", "konsultasi", "skill", "development", "fresh graduate" → ADVISOR_QUERY
-        - Jika ragu, default ke RAG_QUERY
+        - Jika ragu, default ke ADVISOR_QUERY (paling general)
         
         **HANYA respon dengan salah satu dari: RAG_QUERY, SQL_QUERY, ADVISOR_QUERY**
         
@@ -132,24 +142,25 @@ class Orchestrator:
             if intent in valid_intents:
                 return intent
             else:
-                # Default ke RAG jika intent tidak valid
-                logger.warning(f"Invalid intent from LLM: {intent}, defaulting to RAG_QUERY")
-                return "RAG_QUERY"
+                # Default ke ADVISOR jika intent tidak valid
+                logger.warning(f"Invalid intent from LLM: {intent}, defaulting to ADVISOR_QUERY")
+                return "ADVISOR_QUERY"
                 
         except Exception as e:
             logger.error(f"Error in LLM intent classification: {str(e)}")
-            # Default ke RAG jika error
-            return "RAG_QUERY"
+            # Default ke ADVISOR jika error (paling aman)
+            return "ADVISOR_QUERY"
     
     def route_query(self, query: str) -> str:
         """
         Route query ke agent yang sesuai berdasarkan intent classification
+        Dengan fallback jika agent tidak tersedia
         
         Args:
             query: Pertanyaan user
             
         Returns:
-            Response dari agent yang sesuai
+            Response dari agent yang sesuai atau fallback
         """
         try:
             logger.info(f"Routing query: '{query}'")
@@ -158,21 +169,29 @@ class Orchestrator:
             intent = self.classify_intent(query)
             logger.info(f"Detected intent: {intent}")
             
-            # Route ke agent yang sesuai
+            # Route ke agent yang sesuai dengan fallback
             if intent == "SQL_QUERY":
-                logger.info("Delegating to SQL Agent...")
-                response = self.sql_agent.run(query)
-                response = f"📊 **Analisis Data:**\n\n{response}"
+                if self.available_agents["sql"]:
+                    logger.info("Delegating to SQL Agent...")
+                    response = self.sql_agent.run(query)
+                    response = f"📊 **Analisis Data:**\n\n{response}"
+                else:
+                    response = self._fallback_response("SQL", query)
                 
-            elif intent == "ADVISOR_QUERY":
-                logger.info("Delegating to Advisor Agent (general advice)...")
-                # Untuk advisor query general (tanpa CV)
-                response = self._handle_general_advice(query)
+            elif intent == "RAG_QUERY":
+                if self.available_agents["rag"]:
+                    logger.info("Delegating to RAG Agent...")
+                    response = self.rag_agent.run(query)
+                    response = f"🔍 **Hasil Pencarian Lowongan:**\n\n{response}"
+                else:
+                    response = self._fallback_response("RAG", query)
                 
-            else:  # RAG_QUERY (default)
-                logger.info("Delegating to RAG Agent...")
-                response = self.rag_agent.run(query)
-                response = f"🔍 **Hasil Pencarian Lowongan:**\n\n{response}"
+            else:  # ADVISOR_QUERY
+                if self.available_agents["advisor"]:
+                    logger.info("Delegating to Advisor Agent (general advice)...")
+                    response = self._handle_general_advice(query)
+                else:
+                    response = self._fallback_response("ADVISOR", query)
             
             # Tambahkan metadata response
             response += f"\n\n---\n*Kategori: {intent.replace('_', ' ')}*"
@@ -186,6 +205,38 @@ class Orchestrator:
                 f"Error: {str(e)[:100]}\n\n"
                 f"Silakan coba dengan pertanyaan yang berbeda atau lebih spesifik."
             )
+    
+    def _fallback_response(self, agent_type: str, query: str) -> str:
+        """Generate fallback response jika agent tidak tersedia"""
+        if agent_type == "RAG":
+            return (
+                "⚠️ **Fitur Pencarian Lowongan Tidak Tersedia**\n\n"
+                "Saat ini sistem pencarian lowongan sedang tidak aktif karena koneksi "
+                "ke database Qdrant belum tersedia.\n\n"
+                "**Alternatif:**\n"
+                "- Coba gunakan mode 'Analisis Data' untuk statistik lowongan\n"
+                "- Atau gunakan mode 'Konsultasi Karir' untuk saran profesional\n\n"
+                "Mohon maaf atas ketidaknyamanannya."
+            )
+        elif agent_type == "SQL":
+            return (
+                "⚠️ **Fitur Analisis Data Tidak Tersedia**\n\n"
+                "Saat ini sistem analisis data sedang tidak aktif.\n\n"
+                "**Alternatif:**\n"
+                "- Coba gunakan mode 'Tanya Lowongan' untuk pencarian\n"
+                "- Atau gunakan mode 'Konsultasi Karir' untuk saran umum\n\n"
+                "Mohon maaf atas ketidaknyamanannya."
+            )
+        else:  # ADVISOR
+            # Advisor bisa fallback ke LLM langsung
+            try:
+                return self._handle_general_advice(query)
+            except:
+                return (
+                    "⚠️ **Fitur Konsultasi Tidak Tersedia**\n\n"
+                    "Saat ini sistem konsultasi karir sedang tidak aktif.\n\n"
+                    "Mohon maaf atas ketidaknyamanannya."
+                )
     
     def _handle_general_advice(self, query: str) -> str:
         """Handle general career advice queries (tanpa CV upload)"""
@@ -233,6 +284,14 @@ class Orchestrator:
             if not pdf_path or not pdf_path.endswith('.pdf'):
                 return "❌ File harus dalam format PDF. Silakan upload file PDF yang valid."
             
+            # Check if advisor available
+            if not self.available_agents["advisor"]:
+                return (
+                    "⚠️ **Fitur Analisis CV Tidak Tersedia**\n\n"
+                    "Saat ini sistem analisis CV sedang tidak aktif.\n\n"
+                    "Mohon maaf atas ketidaknyamanannya."
+                )
+            
             # Delegate ke Advisor Agent
             response = self.advisor_agent.analyze_and_recommend(pdf_path)
             
@@ -243,23 +302,3 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"Error in CV analysis: {str(e)}")
             return f"❌ Terjadi kesalahan dalam menganalisis CV: {str(e)[:200]}"
-
-# ============================================================================
-# PSEUDOCODE ASLI (dijadikan komentar untuk referensi)
-# ============================================================================
-"""
-PSEUDOCODE - ORCHESTRATOR (Original Concept)
-
-FUNCTION route_query(user_query):
-    # STEP 1: Pikirkan (Klasifikasi)
-    intent = AI_Classifier(user_query)  # "SQL" atau "RAG"
-    
-    # STEP 2: Delegasikan Tugas
-    IF intent == "SQL":
-        RETURN sql_agent.run(user_query)
-    ELSE IF intent == "RAG":
-        RETURN rag_agent.run(user_query)
-    ELSE:
-        # Fallback ke RAG
-        RETURN rag_agent.run(user_query)
-"""
