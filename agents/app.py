@@ -130,9 +130,15 @@ def initialize_agents():
     return rag_agent, sql_agent, advisor_agent, orchestrator
 
 # ==================== STEP 3: SIDEBAR & NAVIGATION ====================
-def setup_sidebar():
+def setup_sidebar(rag_agent, sql_agent, advisor_agent, orchestrator):
     """
     Setup sidebar dengan navigation dan informasi
+    
+    Args:
+        rag_agent: Instance RAGAgent
+        sql_agent: Instance SQLAgent
+        advisor_agent: Instance AdvisorAgent
+        orchestrator: Instance Orchestrator
     """
     with st.sidebar:
         st.title("🎯 AI Career Assistant")
@@ -172,7 +178,7 @@ def setup_sidebar():
         if all(agent is not None for agent in [rag_agent, sql_agent, advisor_agent, orchestrator]):
             st.success("Semua sistem berjalan normal")
         else:
-            st.error("Beberapa sistem bermasalah")
+            st.warning("Beberapa sistem dalam mode terbatas")
         
         # Footer
         st.markdown("---")
