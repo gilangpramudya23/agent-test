@@ -198,7 +198,7 @@ def check_environment():
     """
     Cek apakah environment variables sudah di-set
     """
-    required_vars = ["OPENAI_API_KEY", "QDRANT_URL"]
+    required_vars = ["OPENAI_API_KEY"]  # Qdrant optional untuk demo
     missing_vars = []
     
     for var in required_vars:
@@ -208,14 +208,23 @@ def check_environment():
     if missing_vars:
         st.error(f"⚠️ Environment variables berikut belum di-set: {', '.join(missing_vars)}")
         st.info("""
-        Tambahkan ke file `.env`:
+        **Cara Setup di Streamlit Cloud:**
+        1. Buka Settings ⚙️ di dashboard Streamlit
+        2. Pilih tab "Secrets"
+        3. Tambahkan:
+        ```toml
+        OPENAI_API_KEY = "sk-proj-..."
+        QDRANT_URL = "https://xxx.cloud.qdrant.io"
+        QDRANT_API_KEY = "xxx"
         ```
-        OPENAI_API_KEY=sk-...
-        QDRANT_URL=https://your-cluster.cloud.qdrant.io
-        QDRANT_API_KEY=your-api-key
-        ```
+        4. Save dan restart app
         """)
         return False
+    
+    # Peringatan jika Qdrant tidak di-set
+    if not os.getenv("QDRANT_URL"):
+        st.warning("⚠️ Qdrant belum dikonfigurasi. Fitur pencarian lowongan akan terbatas.")
+    
     return True
 
 # ==================== STEP 4: CHAT INTERFACE ====================
