@@ -14,6 +14,11 @@ from qdrant_client.http import models
 import os
 from dotenv import load_dotenv
 
+# Update semua import LangChain seperti ini:
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+
 # Load environment variables
 load_dotenv()
 
