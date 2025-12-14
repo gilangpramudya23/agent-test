@@ -12,6 +12,10 @@ import tempfile
 import time
 from datetime import datetime
 
+# PERBAIKAN: Tambahkan current directory ke Python path
+current_dir = Path(__file__).parent
+sys.path.insert(0, str(current_dir))
+
 # Import agent classes dari modul lokal
 from rag_agent import RAGAgent
 from sql_agent import SQLAgent
@@ -48,7 +52,7 @@ def initialize_agents():
         Tuple: (rag_agent, sql_agent, advisor_agent, orchestrator)
     """
     try:
-        st.sidebar.info("🔄 Menginisialisasi AI Agents...")
+        st.sidebar.info("📄 Menginisialisasi AI Agents...")
         
         # 1. Initialize RAG Agent
         with st.spinner("Menghubungkan ke database lowongan..."):
@@ -343,7 +347,7 @@ def render_cv_mode(advisor_agent):
                 time.sleep(1)
                 
                 # Step 2: Extracting text
-                status_text.text("🔤 Mengekstrak teks dari CV...")
+                status_text.text("📤 Mengekstrak teks dari CV...")
                 progress_bar.progress(50)
                 time.sleep(1)
                 
@@ -373,7 +377,7 @@ def render_cv_mode(advisor_agent):
                 
                 with col1:
                     st.info("""
-                    **✍️ Perbaiki CV**
+                    **✏️ Perbaiki CV**
                     - Optimasi kata kunci
                     - Highlight pencapaian
                     - Format profesional
@@ -498,7 +502,7 @@ def render_data_mode(sql_agent):
                 st.error(f"❌ Error dalam analisis data: {str(e)[:200]}")
     
     # Sample datasets preview
-    with st.expander("📁 Preview Data Tersedia"):
+    with st.expander("🔎 Preview Data Tersedia"):
         st.markdown("""
         **Tabel jobs:**
         - title: Judul lowongan
