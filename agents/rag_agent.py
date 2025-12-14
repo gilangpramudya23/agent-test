@@ -6,18 +6,13 @@ Menggunakan Qdrant Cloud + OpenAI Embeddings
 import logging
 from typing import List, Optional
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import Document
-from langchain.schema.output_parser import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate  # ✅ FIXED: Import dari langchain_core
+from langchain_core.documents import Document  # ✅ FIXED: Import dari langchain_core
+from langchain_core.output_parsers import StrOutputParser  # ✅ FIXED: Import dari langchain_core
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 import os
 from dotenv import load_dotenv
-
-# Update semua import LangChain seperti ini:
-from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
 
 # Load environment variables
 load_dotenv()
