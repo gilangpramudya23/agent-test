@@ -10,8 +10,8 @@ import os
 import logging
 from typing import Optional
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate  # ✅ FIXED
+from langchain_core.output_parsers import StrOutputParser  # ✅ FIXED
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
