@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities import SQLDatabase
-from langchain_community.agent_toolkits import create_sql_agent, SQLDatabaseToolkit  # ✅ FIXED
+from langchain_community.agent_toolkits import create_sql_agent, SQLDatabaseToolkit
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,11 @@ class SQLAgent:
         
         # Initialize database connection
         try:
+            # ✅ FIX: Hanya include table 'jobs' yang pasti ada
             self.db = SQLDatabase.from_uri(
                 db_uri,
-                include_tables=['jobs', 'salaries', 'companies'],  # Hanya table yang diperlukan
-                sample_rows_in_table_info=3,  # Ambil sample data untuk context
+                include_tables=['jobs'],  # Hanya jobs table
+                sample_rows_in_table_info=3,
             )
             logger.info(f"Connected to database: {db_uri}")
         except Exception as e:
@@ -63,7 +64,7 @@ class SQLAgent:
             toolkit=toolkit,
             verbose=verbose,
             max_iterations=max_iterations,
-            handle_parsing_errors=True,  # Self-correction
+            handle_parsing_errors=True,
             agent_executor_kwargs={
                 "handle_parsing_errors": True,
                 "return_intermediate_steps": False
@@ -79,9 +80,7 @@ class SQLAgent:
             5. Format angka dengan pemisah ribuan (contoh: 10.000.000)
             
             Database berisi tabel:
-            - jobs: lowongan pekerjaan dengan kolom: id, title, company, location, salary_min, salary_max, work_type, posted_date
-            - salaries: data gaji berdasarkan lokasi dan role
-            - companies: informasi perusahaan
+            - jobs: lowongan pekerjaan dengan kolom: id, title, company, location, salary_min, salary_max, work_type, posted_date, description
             
             Contoh query yang valid:
             User: "Rata-rata gaji di Jakarta"
@@ -101,18 +100,16 @@ class SQLAgent:
         """
         # Coba beberapa lokasi umum
         possible_paths = [
-            # Dari root project
             os.path.join(os.getcwd(), 'data', 'processed', 'jobs.db'),
-            # Dari folder agents
             os.path.join(os.path.dirname(__file__), '..', 'data', 'processed', 'jobs.db'),
-            # Absolute path fallback
-            '/app/data/processed/jobs.db'  # Untuk Docker deployment
+            os.path.join(os.path.dirname(__file__), 'data', 'jobs.db'),
+            '/app/data/processed/jobs.db'
         ]
         
         for path in possible_paths:
             if os.path.exists(path):
-                # Convert ke URI format
                 absolute_path = os.path.abspath(path)
+                logger.info(f"Found database at: {absolute_path}")
                 return f"sqlite:///{absolute_path}"
         
         # Jika tidak ditemukan, buat database minimal
@@ -129,14 +126,19 @@ class SQLAgent:
         Path(db_dir).mkdir(parents=True, exist_ok=True)
         
         db_path = os.path.join(db_dir, 'jobs.db')
+        
+        # Hapus database lama jika ada
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        
         conn = sqlite3.connect(db_path)
         
-        # Create minimal tables
+        # Create jobs table
         conn.execute('''
         CREATE TABLE IF NOT EXISTS jobs (
-            id INTEGER PRIMARY KEY,
-            title TEXT,
-            company TEXT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            company TEXT NOT NULL,
             location TEXT,
             salary_min INTEGER,
             salary_max INTEGER,
@@ -146,22 +148,29 @@ class SQLAgent:
         )
         ''')
         
-        # Insert sample data
+        # Insert sample data yang lebih banyak
         sample_jobs = [
-            ("Software Engineer", "Tech Corp", "Jakarta", 15000000, 25000000, "Full-time", "2024-01-15"),
-            ("Data Analyst", "Data Inc", "Bandung", 12000000, 18000000, "Hybrid", "2024-01-10"),
-            ("Product Manager", "Startup XYZ", "Remote", 20000000, 35000000, "Remote", "2024-01-05")
+            ("Software Engineer", "Tech Corp", "Jakarta", 15000000, 25000000, "Full-time", "2024-01-15", "Develop web applications"),
+            ("Data Analyst", "Data Inc", "Bandung", 12000000, 18000000, "Hybrid", "2024-01-10", "Analyze business data"),
+            ("Product Manager", "Startup XYZ", "Remote", 20000000, 35000000, "Remote", "2024-01-05", "Manage product development"),
+            ("Backend Developer", "Tech Solutions", "Jakarta", 18000000, 28000000, "Full-time", "2024-01-12", "Build API services"),
+            ("Data Scientist", "AI Company", "Jakarta", 20000000, 35000000, "Hybrid", "2024-01-08", "Machine learning projects"),
+            ("Frontend Developer", "WebDev Co", "Surabaya", 14000000, 22000000, "Full-time", "2024-01-14", "Create user interfaces"),
+            ("DevOps Engineer", "Cloud Tech", "Jakarta", 18000000, 30000000, "Remote", "2024-01-11", "Manage infrastructure"),
+            ("Mobile Developer", "AppCraft", "Bali", 16000000, 26000000, "Hybrid", "2024-01-09", "Build mobile apps"),
+            ("UI/UX Designer", "Design Studio", "Jakarta", 12000000, 20000000, "Full-time", "2024-01-13", "Design user experiences"),
+            ("QA Engineer", "Quality First", "Bandung", 11000000, 17000000, "Hybrid", "2024-01-07", "Test software quality"),
         ]
         
         conn.executemany(
-            "INSERT INTO jobs (title, company, location, salary_min, salary_max, work_type, posted_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO jobs (title, company, location, salary_min, salary_max, work_type, posted_date, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             sample_jobs
         )
         
         conn.commit()
         conn.close()
         
-        logger.info(f"Created minimal database at: {db_path}")
+        logger.info(f"Created minimal database with {len(sample_jobs)} sample jobs at: {db_path}")
         return f"sqlite:///{os.path.abspath(db_path)}"
     
     def run(self, query: str) -> str:
@@ -213,39 +222,3 @@ class SQLAgent:
         answer += "\n\n📊 *Data berdasarkan database lowongan pekerjaan Indonesia*"
         
         return answer
-
-# ============================================================================
-# PSEUDOCODE ASLI (dijadikan komentar untuk referensi)
-# ============================================================================
-"""
-PSEUDOCODE - SQL AGENT (Original Concept)
-
-CLASS SQLAgent:
-    FUNCTION __init__(database_path, llm_model):
-        SET self.db = CONNECT to SQLite database at database_path
-        SET self.llm = llm_model
-
-    FUNCTION get_schema_info():
-        RETURN string berisi "Table: jobs, Columns: salary, location, etc."
-
-    FUNCTION run(user_query):
-        # Step 1: Generate SQL
-        schema = self.get_schema_info()
-        prompt = f"Given schema {schema}, write a SQL query for: {user_query}"
-        sql_query = self.llm.predict(prompt)
-        
-        # Step 2: Safety Check
-        IF "DROP" IN sql_query OR "DELETE" IN sql_query:
-            RETURN "Maaf, saya hanya diperbolehkan membaca data."
-
-        # Step 3: Execute SQL
-        TRY:
-            raw_result = self.db.execute(sql_query)
-        CATCH Error:
-            RETURN "Gagal mengambil data, query SQL mungkin salah."
-
-        # Step 4: Humanize Result
-        final_answer = self.llm.predict(f"User asked: {user_query}. Data found: {raw_result}. Summarize this for user.")
-        
-        RETURN final_answer
-"""
